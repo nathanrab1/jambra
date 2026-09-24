@@ -1737,7 +1737,7 @@ $('#modal').addEventListener('click', (e) => {
 async function openFromDrive() {
   if (!Drive.enabled()) return toast(NO_DRIVE, 5000);
   if (!Drive.connected() && !(await connectDrive())) return;
-  openModal('Pasta Jambra no Google Drive', '<p class="muted">Carregando…</p>');
+  openModal('Pasta Jambra no Google Drive', '<div class="loading">Carregando seus murais…</div>');
   try {
     const files = await Drive.listBoards();
     $('#modal-body').innerHTML = files.length
@@ -1746,9 +1746,9 @@ async function openFromDrive() {
             <button data-file="${esc(f.id)}" data-room="${esc(f.appProperties?.room || '')}"><span class="name">${esc(f.name.replace(/\.jambra\.json$/, ''))}</span><time>${fmtDate(f.modifiedTime)}</time></button>
             <button class="icon-btn" data-trash="${esc(f.id)}" title="Mandar para a lixeira do Drive"><svg><use href="#i-del"/></svg></button>
           </div>`).join('')}</div>`
-      : '<p class="muted">A pasta "Jambra" ainda está vazia. Abra um mural e use “Salvar no Drive”.</p>';
+      : '<p>A pasta "Jambra" ainda está vazia. Abra um mural e use “Salvar no Drive”.</p>';
   } catch (e) {
-    $('#modal-body').innerHTML = `<p class="muted">Não foi possível acessar o Drive: ${esc(e.message)}</p>`;
+    $('#modal-body').innerHTML = `<p>Não foi possível acessar o Drive: ${esc(e.message)}</p>`;
   }
 }
 
@@ -1771,7 +1771,7 @@ $('#modal-body').addEventListener('click', async (e) => {
   }
   const b = e.target.closest('[data-file]');
   if (!b) return;
-  $('#modal-body').innerHTML = '<p class="muted">Abrindo…</p>';
+  $('#modal-body').innerHTML = '<div class="loading">Abrindo o mural…</div>';
   try {
     const snap = await Drive.loadBoard(b.dataset.file);
     const roomId = snap.roomId || b.dataset.room || rid(12);
@@ -1780,7 +1780,7 @@ $('#modal-body').addEventListener('click', async (e) => {
     if (S.roomId === roomId) return;
     await openBoard(roomId, { snapshot: snap });
   } catch (err) {
-    $('#modal-body').innerHTML = `<p class="muted">Não foi possível abrir: ${esc(err.message)}</p>`;
+    $('#modal-body').innerHTML = `<p>Não foi possível abrir: ${esc(err.message)}</p>`;
   }
 });
 
