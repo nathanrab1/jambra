@@ -1743,7 +1743,7 @@ async function openFromDrive() {
     $('#modal-body').innerHTML = files.length
       ? `<div class="file-list">${files.map((f) => `
           <div class="file-row">
-            <button data-file="${esc(f.id)}" data-room="${esc(f.appProperties?.room || '')}"><span class="name">${esc(f.name.replace(/\.jambra\.json$/, ''))}</span><time>${fmtDate(f.modifiedTime)}</time></button>
+            <button class="file-open" data-file="${esc(f.id)}" data-room="${esc(f.appProperties?.room || '')}"><span class="name">${esc(f.name.replace(/\.jambra\.json$/, ''))}</span><time>Salvo em ${fmtDate(f.modifiedTime)}</time></button>
             <button class="icon-btn" data-trash="${esc(f.id)}" title="Mandar para a lixeira do Drive"><svg><use href="#i-del"/></svg></button>
           </div>`).join('')}</div>`
       : '<p>A pasta "Jambra" ainda está vazia. Abra um mural e use “Salvar no Drive”.</p>';
