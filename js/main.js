@@ -77,11 +77,13 @@ const S = {
   dirty: false, dirtyV: 0, saving: false, driveError: false, needAuth: false,
   me: {
     id: null,
-    name: store.get('jambra:name') || `Visitante ${Math.floor(10 + Math.random() * 90)}`,
+    // nome escolhido pela pessoa; sem ele, aparece como "Visitante N" pela ordem de chegada
+    custom: /^Visitante \d+$/.test(store.get('jambra:name') || '') ? null : store.get('jambra:name'),
+    joined: 0,
     color: store.get('jambra:color') || PEOPLE[Math.floor(Math.random() * PEOPLE.length)],
   },
 };
-store.set('jambra:name', S.me.name);
+store.set('jambra:name', S.me.custom);
 store.set('jambra:color', S.me.color);
 
 /* ================= palco (Konva) ================= */
@@ -348,7 +350,7 @@ function deleteObject(id) {
   markDirty();
 }
 
-const newObj = (type, props) => ({ type, page: S.page, z: Date.now() + Math.random(), by: S.me.name, x: 0, y: 0, ...props });
+const newObj = (type, props) => ({ type, page: S.page, z: Date.now() + Math.random(), by: myName(), x: 0, y: 0, ...props });
 
 const geom = (n) => ({
   x: round(n.x()), y: round(n.y()), rotation: round(n.rotation(), 2),
@@ -487,7 +489,7 @@ function duplicate(objs = selectedObjs(), offset = 24 * U()) {
   const now = Date.now();
   const ids = objs.map((o, i) => {
     const id = rid();
-    putObject(id, { ...clone(o), x: (o.x || 0) + offset, y: (o.y || 0) + offset, page: S.page, z: now + i, by: S.me.name });
+    putObject(id, { ...clone(o), x: (o.x || 0) + offset, y: (o.y || 0) + offset, page: S.page, z: now + i, by: myName() });
     return id;
   });
   pushHistory(ids.map((id) => ({ id, before: null, after: clone(S.objects.get(id)) })));
@@ -1489,7 +1491,7 @@ $('#title').addEventListener('keydown', (e) => { if (e.key === 'Enter' || e.key 
 function sendPresence(pos) {
   if (!S.sync) return;
   if (pos) S.lastPos = pos;
-  S.sync.setPresence({ name: S.me.name, color: S.me.color, page: S.page, ...S.lastPos, t: Date.now() });
+  S.sync.setPresence({ name: S.me.custom || null, joined: S.me.joined, color: S.me.color, page: S.page, ...S.lastPos, t: Date.now() });
 }
 
 function makeCursor() {
@@ -1510,7 +1512,7 @@ function updateCursor(peer) {
   node.setAttrs({ x: p.x || 0, y: p.y || 0, scaleX: s, scaleY: s });
   node.findOne('.arrow').fill(p.color);
   node.findOne('.tag').fill(p.color);
-  node.findOne('.label').text(p.name);
+  node.findOne('.label').text(nameOf(peer.id, p));
   ui.batchDraw();
 }
 const updateCursors = () => S.peers.forEach(updateCursor);
@@ -1519,20 +1521,35 @@ function applyPresence(id, p) {
   if (id === S.me.id) return;
   let peer = S.peers.get(id);
   if (!p) {
-    if (peer) { peer.node.destroy(); S.peers.delete(id); renderPeople(); ui.batchDraw(); }
+    if (peer) { peer.node.destroy(); S.peers.delete(id); renderPeople(); updateCursors(); ui.batchDraw(); }
     return;
   }
-  if (!peer) S.peers.set(id, (peer = { node: makeCursor() }));
-  const changed = !peer.data || peer.data.name !== p.name || peer.data.color !== p.color;
+  const isNew = !peer;
+  if (!peer) S.peers.set(id, (peer = { id, node: makeCursor() }));
+  const changed = isNew || peer.data.name !== p.name || peer.data.color !== p.color || peer.data.joined !== p.joined;
   peer.data = p;
-  updateCursor(peer);
-  if (changed) renderPeople();
+  if (changed) { renderPeople(); updateCursors(); }
+  else updateCursor(peer);
 }
+
+// Visitantes sem nome são numerados de 1 até N pela ordem em que entraram no mural.
+// Todos calculam a partir da mesma lista de presença, então veem os mesmos números.
+function visitorRanks() {
+  const list = [{ id: S.me.id, name: S.me.custom, joined: S.me.joined }, ...[...S.peers.values()].map((p) => ({ id: p.id, ...p.data }))]
+    .filter((p) => !p.name)
+    .sort((a, b) => (a.joined || a.t || 0) - (b.joined || b.t || 0) || String(a.id).localeCompare(String(b.id)));
+  return new Map(list.map((p, i) => [p.id, i + 1]));
+}
+const nameOf = (id, data) => data?.name || `Visitante ${visitorRanks().get(id) || 1}`;
+const myName = () => nameOf(S.me.id, { name: S.me.custom });
 
 const initials = (name) => (name || '?').trim().split(/\s+/).slice(0, 2).map((w) => w[0]).join('').toUpperCase();
 
 function renderPeople() {
-  const list = [{ me: true, ...S.me }, ...[...S.peers.values()].map((p) => p.data)];
+  const list = [
+    { me: true, color: S.me.color, name: myName() },
+    ...[...S.peers.values()].sort((a, b) => (a.data.joined || 0) - (b.data.joined || 0)).map((p) => ({ color: p.data.color, name: nameOf(p.id, p.data) })),
+  ];
   const shown = list.slice(0, 6);
   $('#people').innerHTML =
     shown.map((p) => `<span class="avatar" style="--c:${esc(p.color)}" title="${esc(p.name)}${p.me ? ' (você) — clique para mudar' : ''}" ${p.me ? 'data-me' : ''}>${esc(initials(p.name))}</span>`).join('') +
@@ -1542,11 +1559,12 @@ function renderPeople() {
 $('#people').addEventListener('click', (e) => { if (e.target.closest('[data-me]')) renameMe(); });
 
 function renameMe() {
-  const name = prompt('Como você quer aparecer para os outros?', S.me.name);
-  if (!name?.trim()) return;
-  S.me.name = name.trim().slice(0, 40);
-  store.set('jambra:name', S.me.name);
+  const name = prompt('Como você quer aparecer para os outros?\n(Deixe em branco para voltar a ser "Visitante" com número.)', S.me.custom || '');
+  if (name == null) return;
+  S.me.custom = name.trim().slice(0, 40) || null;
+  store.set('jambra:name', S.me.custom);
   renderPeople();
+  updateCursors();
   sendPresence();
 }
 
@@ -1608,6 +1626,7 @@ async function openBoard(roomId, opts = {}) {
   if (S.token !== token) return sync.close();
   S.sync = sync;
   S.me.id = sync.id;
+  S.me.joined = Date.now();
 
   await Promise.race([sync.ready, wait(8000)]);
   if (S.token !== token) return;
