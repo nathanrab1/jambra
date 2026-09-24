@@ -124,6 +124,7 @@ const viewCenter = () => {
   return { x: clamp(c.x, 0, PAGE_W), y: clamp(c.y, 0, PAGE_H) };
 };
 const visibleNodes = () => [...S.nodes.values()].filter((n) => n.visible());
+const selectableNodes = () => visibleNodes().filter((n) => n.getAttr('otype') !== 'background');
 
 /* ---------- visualização ---------- */
 
@@ -184,6 +185,7 @@ function createNode(o) {
     case 'ellipse': return new Konva.Ellipse({ perfectDrawEnabled: false });
     case 'text': return new Konva.Text({ fontFamily: FONT, lineHeight: 1.25 });
     case 'image': return new Konva.Image({});
+    case 'background': return new Konva.Image({ listening: false });
     case 'sticky': {
       const g = new Konva.Group();
       g.add(new Konva.Rect({ name: 'bg', cornerRadius: 2, shadowColor: '#000', shadowOpacity: 0.18, shadowBlur: 10, shadowOffsetY: 3 }));
@@ -235,6 +237,7 @@ function updateNode(n, o) {
       break;
     }
     case 'image':
+    case 'background':
       n.setAttrs({ width: o.w, height: o.h });
       if (n.getAttr('src') !== o.src) {
         n.setAttr('src', o.src);
@@ -257,7 +260,7 @@ function renderObject(id, o) {
   }
   updateNode(n, o);
   n.visible(o.page === S.page);
-  n.draggable(S.tool === 'select');
+  n.draggable(S.tool === 'select' && o.type !== 'background');
   if (n.getAttr('z') !== o.z) { n.setAttr('z', o.z); scheduleSort(); }
   if (tr.nodes().includes(n)) { tr.forceUpdate(); positionSelbar(); }
   layer.batchDraw();
@@ -915,7 +918,7 @@ function onUp() {
   else if (g.kind === 'band') {
     const r = band.getClientRect();
     band.visible(false);
-    const hits = r.width + r.height > 4 ? visibleNodes().filter((n) => Konva.Util.haveIntersection(r, n.getClientRect())) : [];
+    const hits = r.width + r.height > 4 ? selectableNodes().filter((n) => Konva.Util.haveIntersection(r, n.getClientRect())) : [];
     select([...new Set([...g.base, ...hits])]);
   }
 }
@@ -976,6 +979,74 @@ async function addImageFile(file, at) {
   }
 }
 
+/* ---------- imagem de fundo do quadro ---------- */
+
+const pageBackgrounds = (pid = S.page) =>
+  [...S.objects].filter(([, o]) => o.page === pid && o.type === 'background').map(([id]) => id);
+
+// Ajusta a imagem ao slide: se já for quase 16:9, preenche (corta um pouco);
+// senão mostra inteira, centralizada sobre branco.
+async function makeBackground(file) {
+  const img = await loadImg(await readFile(file));
+  const W = PAGE_W, H = PAGE_H;
+  const c = document.createElement('canvas');
+  c.width = W;
+  c.height = H;
+  const ctx = c.getContext('2d');
+  ctx.fillStyle = '#fff';
+  ctx.fillRect(0, 0, W, H);
+  const cover = Math.abs(img.width / img.height / (W / H) - 1) < 0.15;
+  const sc = cover ? Math.max(W / img.width, H / img.height) : Math.min(W / img.width, H / img.height);
+  const w = img.width * sc, h = img.height * sc;
+  ctx.imageSmoothingQuality = 'high';
+  ctx.drawImage(img, (W - w) / 2, (H - h) / 2, w, h);
+  return c.toDataURL('image/jpeg', 0.85);
+}
+
+async function setBackground(file) {
+  if (!file?.type.startsWith('image/') || !S.sync || !S.page) return;
+  try {
+    const src = await makeBackground(file);
+    const entries = pageBackgrounds().map((id) => ({ id, before: clone(S.objects.get(id)), after: null }));
+    entries.forEach((e) => deleteObject(e.id));
+    const id = 'bg' + rid();
+    putObject(id, newObj('background', { x: 0, y: 0, w: PAGE_W, h: PAGE_H, src, z: -1e13 }));
+    entries.push({ id, before: null, after: clone(S.objects.get(id)) });
+    pushHistory(entries);
+    renderPagesUI();
+  } catch (err) {
+    console.error(err);
+    toast('Não foi possível usar essa imagem como fundo.');
+  }
+}
+
+function removeBackground() {
+  const entries = pageBackgrounds().map((id) => ({ id, before: clone(S.objects.get(id)), after: null }));
+  entries.forEach((e) => deleteObject(e.id));
+  pushHistory(entries);
+  renderPagesUI();
+}
+
+$('#btn-bg').addEventListener('click', (e) => {
+  e.stopPropagation();
+  if (!S.sync) return;
+  const m = $('#bg-menu');
+  if (!pageBackgrounds().length) { m.hidden = true; return $('#file-bg').click(); }
+  $$('.menu').forEach((x) => { if (x !== m) x.hidden = true; });
+  m.hidden = !m.hidden;
+});
+$('#bg-menu').addEventListener('click', (e) => {
+  const b = e.target.closest('[data-bg]');
+  if (!b) return;
+  $('#bg-menu').hidden = true;
+  if (b.dataset.bg === 'change') $('#file-bg').click();
+  else removeBackground();
+});
+$('#file-bg').addEventListener('change', async (e) => {
+  await setBackground(e.target.files[0]);
+  e.target.value = '';
+});
+
 $('#file-image').addEventListener('change', async (e) => {
   for (const f of e.target.files) await addImageFile(f);
   e.target.value = '';
@@ -1018,7 +1089,7 @@ function setTool(t) {
   S.tool = t;
   $$('.tool[data-tool]').forEach((b) => b.classList.toggle('active', b.dataset.tool === t));
   const drag = t === 'select';
-  S.nodes.forEach((n) => n.draggable(drag));
+  S.nodes.forEach((n) => n.draggable(drag && n.getAttr('otype') !== 'background'));
   if (!drag) select([]);
   boardEl.dataset.tool = t;
   renderToolPanel();
@@ -1123,6 +1194,7 @@ function goPage(pid) {
 
 function renderPagesUI() {
   renderFrames();
+  $('#btn-bg').classList.toggle('active', pageBackgrounds().length > 0);
   const list = pageList();
   const i = list.indexOf(S.page);
   $('#page-num').textContent = `${i + 1} / ${list.length}`;
@@ -1188,6 +1260,7 @@ let framesTimer = null;
 
 function markPage(pid) {
   if (!pid) return;
+  if (pid === S.page) $('#btn-bg').classList.toggle('active', pageBackgrounds().length > 0);
   stalePages.add(pid);
   if (S.framesOpen) { clearTimeout(framesTimer); framesTimer = setTimeout(renderFrames, 500); }
 }
@@ -1847,7 +1920,7 @@ addEventListener('keydown', (e) => {
   if (mod && k === 'z') { e.preventDefault(); e.shiftKey ? redo() : undo(); return; }
   if (mod && k === 'y') { e.preventDefault(); redo(); return; }
   if (mod && k === 'd') { e.preventDefault(); duplicate(); return; }
-  if (mod && k === 'a') { e.preventDefault(); setTool('select'); select(visibleNodes()); return; }
+  if (mod && k === 'a') { e.preventDefault(); setTool('select'); select(selectableNodes()); return; }
   if (mod && k === 's') { e.preventDefault(); saveToDrive(true); return; }
   if (mod && (k === '=' || k === '+')) { e.preventDefault(); zoomCenter(1.25); return; }
   if (mod && k === '-') { e.preventDefault(); zoomCenter(0.8); return; }
