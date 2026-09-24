@@ -16,7 +16,7 @@
 * { box-sizing: border-box; }
 [hidden] { display: none !important; }
 html, body { margin: 0; height: 100%; overflow: hidden; background: var(--app); overscroll-behavior: none; }
-button { font: inherit; color: inherit; }
+button { font: inherit; color: inherit; touch-action: manipulation; }
 svg { width: 20px; height: 20px; fill: none; stroke: currentColor; stroke-width: 2; stroke-linecap: round; stroke-linejoin: round; flex: none; }
 
 /* ---------- barra superior ---------- */
@@ -140,7 +140,7 @@ svg { width: 20px; height: 20px; fill: none; stroke: currentColor; stroke-width:
 .size i { display: block; border-radius: 50%; background: var(--ink); width: var(--d); height: var(--d); }
 .size.active { background: var(--app); }
 
-.selbar { position: absolute; left: 0; top: 0; z-index: 12; display: flex; align-items: center; gap: 4px; padding: 5px; background: var(--surface); border-radius: 12px; box-shadow: var(--shadow); }
+.selbar { position: absolute; left: 0; top: 0; z-index: 12; max-width: calc(100vw - 16px); overflow-x: auto; scrollbar-width: none; display: flex; align-items: center; gap: 4px; padding: 5px; background: var(--surface); border-radius: 12px; box-shadow: var(--shadow); }
 .selbar .sw { width: 22px; height: 22px; }
 .selbar .icon-btn { width: 32px; height: 32px; }
 .selbar .sep { width: 1px; align-self: stretch; background: var(--line); margin: 2px 4px; }
@@ -225,4 +225,32 @@ textarea.editor.text { outline: 1.5px dashed var(--sel); outline-offset: 4px; }
   .frame { width: 128px; height: 72px; }
   .frame-add { width: 72px; height: 72px; }
   .home-card { padding: 24px 20px; }
+}
+
+/* ---------- telas de toque: alvos de pelo menos ~44px ---------- */
+.toolbar, .frames, .selbar { scrollbar-width: none; }
+.toolbar::-webkit-scrollbar, .frames::-webkit-scrollbar, .selbar::-webkit-scrollbar { display: none; }
+@media (pointer: coarse) {
+  .icon-btn { width: 44px; height: 44px; }
+  .pager .icon-btn { width: 40px; height: 40px; }
+  #page-label { height: 40px; padding: 0 8px 0 12px; }
+  .topbar .btn { height: 44px; }
+  .tool { width: 46px; height: 46px; }
+  .panel { gap: 12px; padding: 12px; }
+  .panel .row { gap: 10px; max-width: 290px; }
+  .sw { width: 36px; height: 36px; }
+  .size { width: 44px; height: 44px; }
+  .selbar { gap: 6px; padding: 6px; }
+  .selbar .sw { width: 32px; height: 32px; flex: none; }
+  .selbar .icon-btn { width: 42px; height: 42px; flex: none; }
+  .menu > button, .menu > a { padding: 13px 14px; }
+  .frame .acts button { width: 36px; height: 36px; }
+  .frame .acts svg { width: 18px; height: 18px; }
+  .file-row .icon-btn { width: 44px; height: 44px; }
+}
+@media (pointer: coarse) and (max-width: 760px) {
+  .topbar .btn { height: 40px; padding: 0 10px; }
+  .topbar > .menu-wrap > .icon-btn { width: 40px; height: 40px; }
+  .pager .icon-btn { width: 36px; height: 36px; }
+  #page-label { height: 36px; padding: 0 6px 0 10px; }
 }

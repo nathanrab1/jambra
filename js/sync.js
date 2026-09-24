@@ -185,8 +185,9 @@ class LocalSync {
   updateObject(id, p) {
     const cur = this.state.objects[id];
     if (!cur) return;
-    const o = { ...cur, ...clean(p) };
-    for (const k in o) if (o[k] === null) delete o[k];
+    // aceita caminhos como no Firebase: { 'likes/abc': true }
+    const o = clean(cur);
+    for (const [k, v] of Object.entries(clean(p))) setPath(o, k, v);
     this.setObject(id, o);
   }
   removeObject(id) {

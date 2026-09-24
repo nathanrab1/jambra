@@ -70,7 +70,7 @@ const prefs = Object.assign({
 const S = {
   roomId: null, token: null, sync: null,
   objects: new Map(), nodes: new Map(), meta: { pages: {} },
-  page: null, tool: 'pen',
+  page: null, tool: 'select',
   busy: new Set(), before: null, editing: null, placeEditor: null,
   undo: [], redo: [], peers: new Map(),
   loading: false, fitted: true, framesOpen: store.get('jambra:frames', false),
@@ -85,6 +85,16 @@ const S = {
 };
 store.set('jambra:name', S.me.custom);
 store.set('jambra:color', S.me.color);
+// Identidade de quem curte: uma por aba/visitante (V1, V2, …), mantida ao recarregar a aba.
+const ME_UID = (() => {
+  try {
+    const id = sessionStorage.getItem('jambra:visitor') || rid(12);
+    sessionStorage.setItem('jambra:visitor', id);
+    return id;
+  } catch {
+    return rid(12);
+  }
+})();
 
 /* ================= palco (Konva) ================= */
 
@@ -116,10 +126,23 @@ const ui = new Konva.Layer();
 stage.add(layer);
 stage.add(ui);
 
+// Telas de toque: alvos maiores para o dedo (alças, traços, borracha).
+const coarseMQ = matchMedia('(pointer: coarse)');
+const coarse = () => coarseMQ.matches;
+const HIT_PX = () => (coarse() ? 28 : 14); // largura mínima (em px na tela) para acertar um traço
+Konva.dragDistance = coarse() ? 8 : 3; // evita arrastar sem querer ao tocar
+
 const tr = new Konva.Transformer({
-  borderStroke: '#1a73e8', anchorStroke: '#1a73e8', anchorFill: '#fff', anchorSize: 10, anchorCornerRadius: 5,
-  padding: 4, rotationSnaps: [0, 90, 180, 270], rotationSnapTolerance: 6, flipEnabled: false,
+  borderStroke: '#1a73e8', anchorStroke: '#1a73e8', anchorFill: '#fff', anchorCornerRadius: 12,
+  rotationSnaps: [0, 90, 180, 270], rotationSnapTolerance: 6, flipEnabled: false,
 });
+function sizeTransformer() {
+  const big = coarse();
+  tr.setAttrs({ anchorSize: big ? 22 : 10, padding: big ? 8 : 4, rotateAnchorOffset: big ? 40 : 30, anchorStrokeWidth: big ? 2 : 1 });
+  Konva.dragDistance = big ? 8 : 3;
+}
+sizeTransformer();
+coarseMQ.addEventListener?.('change', () => { sizeTransformer(); refreshHits(); ui.batchDraw(); });
 ui.add(tr);
 const band = new Konva.Rect({ fill: 'rgba(26,115,232,0.08)', stroke: '#1a73e8', strokeWidth: 1, strokeScaleEnabled: false, visible: false, listening: false });
 ui.add(band);
@@ -167,6 +190,7 @@ function setView(x, y, s) {
   stage.position({ x, y });
   stage.scale({ x: s, y: s });
   $('#zoom-label').textContent = Math.round((s / minScale()) * 100) + '%';
+  if (Math.abs(s - hitScale) > 1e-3) refreshHits();
   updateBg();
   updateCursors();
   positionSelbar();
@@ -219,6 +243,10 @@ function createNode(o) {
       const g = new Konva.Group();
       g.add(new Konva.Rect({ name: 'bg', cornerRadius: 2, shadowColor: '#000', shadowOpacity: 0.18, shadowBlur: 10, shadowOffsetY: 3 }));
       g.add(new Konva.Text({ name: 'txt', fontFamily: FONT, align: 'center', verticalAlign: 'middle', lineHeight: 1.2, fill: '#202124', listening: false }));
+      g.add(new Konva.Rect({ name: 'foot', fill: 'rgba(0,0,0,0.06)', listening: false }));
+      g.add(new Konva.Path({ name: 'heart', data: HEART, listening: false }));
+      g.add(new Konva.Text({ name: 'likes', fontFamily: FONT, fontStyle: 'bold', verticalAlign: 'middle', listening: false }));
+      g.add(new Konva.Rect({ name: 'like', fill: 'rgba(0,0,0,0)' })); // área de toque do ♥
       return g;
     }
     default: return new Konva.Group();
@@ -227,6 +255,8 @@ function createNode(o) {
 
 // Post-it: diminui a fonte até o texto caber.
 const stickyPad = (w) => round(w * 0.07);
+const stickyFoot = (h) => round(h * 0.17, 2); // altura do rodapé de curtidas
+const HEART = 'M12 21.35l-1.45-1.32C5.4 15.36 2 12.28 2 8.5 2 5.42 4.42 3 7.5 3c1.74 0 3.41.81 4.5 2.09C13.09 3.81 14.76 3 16.5 3 19.58 3 22 5.42 22 8.5c0 3.78-3.4 6.86-8.55 11.54L12 21.35z';
 
 function fitText(t, w, h) {
   t.setAttrs({ width: w, height: 'auto', padding: stickyPad(w) });
@@ -237,6 +267,17 @@ function fitText(t, w, h) {
   t.height(h);
 }
 
+// Traços finos ganham uma área de toque de pelo menos HIT_PX na tela, qualquer que seja o zoom.
+const hitWidth = (w) => Math.max(w, HIT_PX() / stage.scaleX());
+let hitScale = 0;
+function refreshHits() {
+  hitScale = stage.scaleX();
+  S.nodes.forEach((n) => {
+    const t = n.getAttr('otype');
+    if (t === 'stroke' || t === 'line' || t === 'arrow') n.hitStrokeWidth(hitWidth(n.strokeWidth()));
+  });
+}
+
 function updateNode(n, o) {
   n.setAttrs({ x: o.x || 0, y: o.y || 0, rotation: o.rotation || 0, scaleX: o.scaleX || 1, scaleY: o.scaleY || 1 });
   const sw = o.sw || 4 * U();
@@ -244,13 +285,13 @@ function updateNode(n, o) {
   switch (o.type) {
     case 'stroke':
       n.setAttrs({
-        points: o.points || [], stroke: o.color, strokeWidth: o.width || 4, hitStrokeWidth: Math.max(o.width || 4, 14),
+        points: o.points || [], stroke: o.color, strokeWidth: o.width || 4, hitStrokeWidth: hitWidth(o.width || 4),
         opacity: o.hl ? 0.45 : 1, globalCompositeOperation: o.hl ? 'multiply' : 'source-over',
       });
       break;
     case 'line':
     case 'arrow':
-      n.setAttrs({ points: o.points || [0, 0, 0, 0], stroke: o.color, fill: o.color, strokeWidth: sw, hitStrokeWidth: 18 });
+      n.setAttrs({ points: o.points || [0, 0, 0, 0], stroke: o.color, fill: o.color, strokeWidth: sw, hitStrokeWidth: hitWidth(sw) });
       if (o.type === 'arrow') n.setAttrs({ pointerLength: sw * 4, pointerWidth: sw * 4 });
       break;
     case 'rect':
@@ -266,7 +307,26 @@ function updateNode(n, o) {
       n.findOne('.bg').setAttrs({ width: o.w, height: o.h, fill: o.color });
       const t = n.findOne('.txt');
       t.text(o.text || '');
-      fitText(t, o.w, o.h);
+      const fh = stickyFoot(o.h);
+      fitText(t, o.w, o.h - fh);
+      // rodapé: ♥ + número de curtidas
+      const count = Object.keys(o.likes || {}).length;
+      const mine = !!o.likes?.[ME_UID];
+      const hs = fh * 0.56, pad = stickyPad(o.w) * 0.7, top = o.h - fh;
+      n.findOne('.foot').setAttrs({ x: 0, y: top, width: o.w, height: fh });
+      // lado direito: número e depois o coração
+      const heartX = o.w - pad - hs;
+      n.findOne('.heart').setAttrs({
+        x: heartX, y: top + (fh - hs) / 2, scaleX: hs / 24, scaleY: hs / 24,
+        fill: mine ? '#d93025' : 'transparent', stroke: mine ? '#d93025' : '#5f6368', strokeWidth: 2,
+      });
+      const numW = o.w * 0.4;
+      n.findOne('.likes').setAttrs({
+        x: heartX - fh * 0.18 - numW, y: top, width: numW, height: fh, align: 'right',
+        text: count ? String(count) : '', fontSize: fh * 0.5, fill: mine ? '#d93025' : '#5f6368',
+      });
+      const likeW = Math.max(o.w * 0.5, fh * 2.5);
+      n.findOne('.like').setAttrs({ x: o.w - likeW, y: top, width: likeW, height: fh });
       break;
     }
     case 'image':
@@ -344,8 +404,15 @@ function putObject(id, o) {
 function patch(id, p) {
   const cur = S.objects.get(id);
   if (!cur) return;
-  const o = { ...cur, ...p };
-  for (const k in o) if (o[k] == null) delete o[k];
+  const o = clone(cur);
+  for (const [k, v] of Object.entries(p)) {
+    const parts = k.split('/');
+    const last = parts.pop();
+    let t = o;
+    for (const part of parts) t = t[part] && typeof t[part] === 'object' ? t[part] : (t[part] = {});
+    if (v == null) delete t[last];
+    else t[last] = v;
+  }
   S.objects.set(id, o);
   if (!S.busy.has(id)) renderObject(id, o);
   S.sync.updateObject(id, p);
@@ -359,6 +426,12 @@ function deleteObject(id) {
   destroyNode(id);
   S.sync.removeObject(id);
   markDirty();
+}
+
+function toggleLike(id) {
+  const o = S.objects.get(id);
+  if (!o) return;
+  patch(id, { ['likes/' + ME_UID]: o.likes?.[ME_UID] ? null : true });
 }
 
 const newObj = (type, props) => ({ type, page: S.page, z: Date.now() + Math.random(), by: myName(), x: 0, y: 0, ...props });
@@ -500,7 +573,9 @@ function duplicate(objs = selectedObjs(), offset = 24 * U()) {
   const now = Date.now();
   const ids = objs.map((o, i) => {
     const id = rid();
-    putObject(id, { ...clone(o), x: (o.x || 0) + offset, y: (o.y || 0) + offset, page: S.page, z: now + i, by: myName() });
+    const copy = clone(o);
+    delete copy.likes;
+    putObject(id, { ...copy, x: (o.x || 0) + offset, y: (o.y || 0) + offset, page: S.page, z: now + i, by: myName() });
     return id;
   });
   pushHistory(ids.map((id) => ({ id, before: null, after: clone(S.objects.get(id)) })));
@@ -559,6 +634,7 @@ function endEdit() {
 }
 
 layer.on('dragstart', (e) => {
+  if (gesture?.kind === 'tapedit') gesture = null;
   const n = objNode(e.target);
   if (!n) return;
   if (!tr.nodes().includes(n)) select([n]);
@@ -607,9 +683,10 @@ function editText(id, isNew = false) {
       ta.style.padding = `0 ${stickyPad(cur.w)}px`;
       ta.style.width = cur.w + 'px';
       ta.style.height = 'auto';
-      const h = Math.min(cur.h, ta.scrollHeight);
+      const room = cur.h - stickyFoot(cur.h);
+      const h = Math.min(room, ta.scrollHeight);
       ta.style.height = h + 'px';
-      dy = (cur.h - h) / 2;
+      dy = (room - h) / 2;
     } else {
       const fs = cur.fs || 32 * U();
       tnode.text(ta.value || ' ');
@@ -629,7 +706,7 @@ function editText(id, isNew = false) {
 
   const sendText = throttle(() => { if (S.objects.has(id)) S.sync.updateObject(id, { text: ta.value }); }, 300);
   ta.addEventListener('input', () => {
-    if (sticky) { tnode.text(ta.value); fitText(tnode, o.w, o.h); }
+    if (sticky) { tnode.text(ta.value); fitText(tnode, o.w, o.h - stickyFoot(o.h)); }
     place();
     sendText();
   });
@@ -655,7 +732,12 @@ function editText(id, isNew = false) {
     pushHistory([{ id, before: isNew ? null : before, after: clone(S.objects.get(id)) }]);
     if (S.tool === 'select') select([n]);
   };
-  ta.addEventListener('blur', finish);
+  // No toque, o navegador pode tirar o foco logo após abrir (eventos emulados); devolve o foco.
+  const openedAt = Date.now();
+  ta.addEventListener('blur', () => {
+    if (Date.now() - openedAt < 400 && !done) { setTimeout(() => ta.focus(), 0); return; }
+    finish();
+  });
   ta.addEventListener('keydown', (e) => {
     e.stopPropagation();
     if (e.key === 'Escape' || (e.key === 'Enter' && (e.metaKey || e.ctrlKey))) { e.preventDefault(); ta.blur(); }
@@ -754,6 +836,12 @@ boardEl.addEventListener('pointerdown', (e) => {
     return;
   }
   if (e.button !== 0) return;
+  const likeHit = stage.getIntersection(sp);
+  if (likeHit?.name() === 'like') {
+    e.preventDefault();
+    toggleLike(objNode(likeHit)?.getAttr('oid'));
+    return;
+  }
   if (S.tool !== 'select' && S.tool !== 'eraser' && !inPage(wp)) return; // fora do slide
 
   switch (S.tool) {
@@ -765,8 +853,12 @@ boardEl.addEventListener('pointerdown', (e) => {
       eraseAt(sp);
       capture(e);
       return;
-    case 'sticky': e.preventDefault(); return createSticky(wp);
-    case 'text': e.preventDefault(); return createText(wp);
+    case 'sticky':
+    case 'text':
+      e.preventDefault();
+      gesture = { kind: 'tap', tool: S.tool, wp, sx: e.clientX, sy: e.clientY };
+      capture(e);
+      return;
     case 'shape': return startShape(e, wp);
   }
 });
@@ -777,8 +869,14 @@ function downSelect(e, sp, wp) {
   const n = objNode(hit);
   if (n) {
     const sel = tr.nodes();
+    const wasOnlySelected = sel.length === 1 && sel[0] === n;
     if (e.shiftKey) select(sel.includes(n) ? sel.filter((x) => x !== n) : [...sel, n]);
     else if (!sel.includes(n)) select([n]);
+    const t = n.getAttr('otype');
+    if (e.pointerType === 'touch' && wasOnlySelected && (t === 'sticky' || t === 'text')) {
+      e.preventDefault(); // evita o "clique de mouse" emulado que tiraria o foco do editor
+      gesture = { kind: 'tapedit', id: n.getAttr('oid'), sx: e.clientX, sy: e.clientY };
+    }
     return; // o Konva cuida do arraste
   }
   if (!e.shiftKey) select([]);
@@ -837,8 +935,9 @@ function endStroke(g) {
 /* ---------- borracha ---------- */
 
 function eraseAt(sp) {
-  const r = 6;
-  for (const [dx, dy] of [[0, 0], [r, 0], [-r, 0], [0, r], [0, -r]]) {
+  const r = coarse() ? 14 : 6;
+  const h = r * 0.7;
+  for (const [dx, dy] of [[0, 0], [r, 0], [-r, 0], [0, r], [0, -r], [h, h], [-h, h], [h, -h], [-h, -h]]) {
     const n = objNode(stage.getIntersection({ x: sp.x + dx, y: sp.y + dy }));
     if (!n) continue;
     const id = n.getAttr('oid');
@@ -920,7 +1019,10 @@ const sendCursor = throttle((wp) => sendPresence({ x: round(wp.x), y: round(wp.y
 boardEl.addEventListener('pointermove', (e) => {
   if (!S.roomId || !S.sync) return;
   const sp = screenPt(e), wp = worldPt(sp);
-  if (e.pointerType !== 'touch') sendCursor(wp);
+  if (e.pointerType !== 'touch') {
+    sendCursor(wp);
+    if (!gesture) boardEl.style.cursor = stage.getIntersection(sp)?.name() === 'like' ? 'pointer' : '';
+  }
   const g = gesture;
   if (!g || pinch) return;
   if (g.kind === 'pan') {
@@ -942,11 +1044,17 @@ boardEl.addEventListener('pointermove', (e) => {
   }
 });
 
-function onUp() {
+function onUp(e) {
   const g = gesture;
   gesture = null;
   if (!g) return;
   boardEl.classList.remove('grabbing');
+  if (g.kind === 'tap' || g.kind === 'tapedit') {
+    const moved = Math.hypot(e.clientX - g.sx, e.clientY - g.sy) > (coarse() ? 12 : 6);
+    if (moved || e.type === 'pointercancel') return;
+    if (g.kind === 'tapedit') return editText(g.id);
+    return g.tool === 'sticky' ? createSticky(g.wp) : createText(g.wp);
+  }
   if (g.kind === 'draw') endStroke(g);
   else if (g.kind === 'erase') pushHistory(g.removed);
   else if (g.kind === 'shape') endShape(g);
@@ -1617,7 +1725,7 @@ async function openBoard(roomId, opts = {}) {
   if (location.hash !== '#b=' + roomId) location.hash = 'b=' + roomId;
   $('#home').hidden = true;
   setStatus('connecting');
-  setTool(S.tool);
+  setTool('select'); // todo mural abre com a setinha (selecionar)
   $('#tool-panel').hidden = true;
 
   const live = (fn) => (...a) => S.token === token && fn(...a);
@@ -2101,7 +2209,7 @@ addEventListener('blur', () => { spaceDown = false; boardEl.classList.remove('pa
 /* ================= início ================= */
 
 savePrefs();
-setTool('pen');
+setTool('select');
 updateUndo();
 renderPeople();
 Drive.preload().catch(() => {});
