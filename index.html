@@ -57,9 +57,9 @@
     <button class="icon-btn" id="page-add" title="Novo quadro"><svg><use href="#i-plus"/></svg></button>
   </div>
   <div class="menu-wrap">
-    <button class="icon-btn" id="btn-bg" title="Imagem de fundo do quadro"><svg><use href="#i-wallpaper"/></svg></button>
+    <button class="btn" id="btn-bg" title="Escolher uma imagem ou PDF de fundo para este quadro"><svg><use href="#i-wallpaper"/></svg><span>Imagem de fundo</span></button>
     <div id="bg-menu" class="menu bg-menu" hidden>
-      <button data-bg="change">Trocar imagem de fundo…</button>
+      <button data-bg="change">Trocar fundo (imagem ou PDF)…</button>
       <button data-bg="remove" class="danger">Remover imagem de fundo</button>
     </div>
   </div>
@@ -143,7 +143,7 @@
 </div>
 
 <input type="file" id="file-image" accept="image/*" multiple hidden>
-<input type="file" id="file-bg" accept="image/*" hidden>
+<input type="file" id="file-bg" accept="image/*,application/pdf,.pdf" hidden>
 <input type="file" id="file-json" accept=".json,application/json" hidden>
 <div id="toast" class="toast" role="status" aria-live="polite"></div>
 

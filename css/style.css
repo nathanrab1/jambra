@@ -77,7 +77,8 @@ svg { width: 20px; height: 20px; fill: none; stroke: currentColor; stroke-width:
 .menu > a:hover { background: var(--app); }
 .drive-menu { width: 300px; }
 .bg-menu { left: 0; right: auto; min-width: 230px; }
-#btn-bg.active { background: var(--accent-soft); color: var(--accent-d); }
+#btn-bg.active { background: var(--accent-soft); border-color: #ffd0ad; color: var(--accent-d); }
+.bg-menu { top: 44px; }
 .menu-note { padding: 8px 12px; font-size: 13px; line-height: 1.45; color: var(--muted); }
 .menu .menu-cta { margin: 4px 8px 8px; justify-content: center; }
 .account { display: flex; align-items: center; gap: 10px; padding: 10px 12px 6px; }
@@ -208,6 +209,7 @@ textarea.editor.text { outline: 1.5px dashed var(--sel); outline-offset: 4px; }
   .brand span, .topbar .btn span, .title, .people { display: none; }
   .topbar .btn { padding: 0 10px; }
   #btn-drive .caret { display: none; }
+  #page-add { display: none; }
   .drive-menu { position: fixed; top: 52px; left: 8px; right: 8px; width: auto; }
   .toolbar { left: 50%; top: auto; bottom: 12px; transform: translateX(-50%); flex-direction: row; max-width: calc(100% - 24px); overflow-x: auto; }
   .toolbar hr { border-top: 0; border-left: 1px solid var(--line); margin: 6px 4px; }

@@ -63,6 +63,8 @@ Com o escopo `drive.file`, o app só enxerga os arquivos que ele mesmo criou, nu
 
 ## Como funciona
 
+- Cada quadro é um slide com o tamanho do Google Slides widescreen 16:9: **960×540 px**. A exportação em PNG e as imagens de fundo saem em 1920×1080. Murais criados antes dessa mudança continuam em 1600×900.
+- **Imagem de fundo** (botão ao lado do contador de quadros) aceita imagem ou **PDF**. Um PDF com várias páginas, como uma apresentação baixada do Google Slides em Arquivo → Fazer download → PDF, pode virar um quadro por página, com o fundo nítido.
 - Cada mural tem um código no link (`.../#b=abc123`). **Quem tem o link edita.**
 - As alterações são enviadas ao Firebase na hora e aparecem para todos, com os cursores de cada pessoa.
 - **Salvar no Drive** cria um arquivo `.jambra.json` na pasta "Jambra" do Drive de quem clicou. Depois disso, o mural é salvo sozinho a cada ~15 s enquanto houver alterações.

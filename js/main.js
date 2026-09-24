@@ -88,12 +88,28 @@ store.set('jambra:color', S.me.color);
 
 const boardEl = $('#board');
 const stage = new Konva.Stage({ container: boardEl, width: boardEl.clientWidth || innerWidth, height: boardEl.clientHeight || innerHeight });
-// Cada quadro é um slide de tamanho fixo (16:9), como no Jamboard.
-const PAGE_W = 1600;
-const PAGE_H = 900;
+// Cada quadro é um slide de tamanho fixo 16:9, como no Jamboard.
+// Murais novos usam o tamanho do Google Slides widescreen (960×540 px);
+// murais criados antes guardam o tamanho antigo (1600×900) para nada sair do lugar.
+const SLIDE_SIZE = { w: 960, h: 540 };
+const LEGACY_SIZE = { w: 1600, h: 900 };
+let PAGE_W = LEGACY_SIZE.w;
+let PAGE_H = LEGACY_SIZE.h;
+// Fator para tamanhos padrão (post-it, fonte, espessura), pensados para 1600 de largura.
+const U = () => PAGE_W / 1600;
 const inPage = (p) => p.x >= 0 && p.y >= 0 && p.x <= PAGE_W && p.y <= PAGE_H;
 
 const layer = new Konva.Layer({ clip: { x: 0, y: 0, width: PAGE_W, height: PAGE_H } });
+
+function setPageSize(size) {
+  const w = size?.w || LEGACY_SIZE.w, h = size?.h || LEGACY_SIZE.h;
+  if (w === PAGE_W && h === PAGE_H) return;
+  PAGE_W = w;
+  PAGE_H = h;
+  layer.clip({ x: 0, y: 0, width: w, height: h });
+  thumbs.clear();
+  fitView();
+}
 const ui = new Konva.Layer();
 stage.add(layer);
 stage.add(ui);
@@ -180,7 +196,7 @@ function createNode(o) {
   switch (o.type) {
     case 'stroke':
     case 'line': return new Konva.Line({ lineCap: 'round', lineJoin: 'round', perfectDrawEnabled: false });
-    case 'arrow': return new Konva.Arrow({ lineCap: 'round', lineJoin: 'round', pointerLength: 16, pointerWidth: 16, perfectDrawEnabled: false });
+    case 'arrow': return new Konva.Arrow({ lineCap: 'round', lineJoin: 'round', perfectDrawEnabled: false });
     case 'rect': return new Konva.Rect({ cornerRadius: 4, perfectDrawEnabled: false });
     case 'ellipse': return new Konva.Ellipse({ perfectDrawEnabled: false });
     case 'text': return new Konva.Text({ fontFamily: FONT, lineHeight: 1.25 });
@@ -189,7 +205,7 @@ function createNode(o) {
     case 'sticky': {
       const g = new Konva.Group();
       g.add(new Konva.Rect({ name: 'bg', cornerRadius: 2, shadowColor: '#000', shadowOpacity: 0.18, shadowBlur: 10, shadowOffsetY: 3 }));
-      g.add(new Konva.Text({ name: 'txt', fontFamily: FONT, align: 'center', verticalAlign: 'middle', padding: 14, lineHeight: 1.2, fill: '#202124', listening: false }));
+      g.add(new Konva.Text({ name: 'txt', fontFamily: FONT, align: 'center', verticalAlign: 'middle', lineHeight: 1.2, fill: '#202124', listening: false }));
       return g;
     }
     default: return new Konva.Group();
@@ -197,17 +213,20 @@ function createNode(o) {
 }
 
 // Post-it: diminui a fonte até o texto caber.
+const stickyPad = (w) => round(w * 0.07);
+
 function fitText(t, w, h) {
-  t.setAttrs({ width: w, height: 'auto' });
-  let fs = 30;
+  t.setAttrs({ width: w, height: 'auto', padding: stickyPad(w) });
+  const step = w / 100;
+  let fs = w * 0.15;
   t.fontSize(fs);
-  while (fs > 10 && t.height() > h) t.fontSize((fs -= 2));
+  while (fs > w * 0.05 && t.height() > h) t.fontSize((fs -= step));
   t.height(h);
 }
 
 function updateNode(n, o) {
   n.setAttrs({ x: o.x || 0, y: o.y || 0, rotation: o.rotation || 0, scaleX: o.scaleX || 1, scaleY: o.scaleY || 1 });
-  const sw = o.sw || 4;
+  const sw = o.sw || 4 * U();
   const fill = o.fill || 'rgba(0,0,0,0)'; // preenchimento invisível para dar para clicar dentro
   switch (o.type) {
     case 'stroke':
@@ -219,6 +238,7 @@ function updateNode(n, o) {
     case 'line':
     case 'arrow':
       n.setAttrs({ points: o.points || [0, 0, 0, 0], stroke: o.color, fill: o.color, strokeWidth: sw, hitStrokeWidth: 18 });
+      if (o.type === 'arrow') n.setAttrs({ pointerLength: sw * 4, pointerWidth: sw * 4 });
       break;
     case 'rect':
       n.setAttrs({ width: o.w, height: o.h, stroke: o.color, strokeWidth: sw, fill });
@@ -227,7 +247,7 @@ function updateNode(n, o) {
       n.setAttrs({ radiusX: o.w / 2, radiusY: o.h / 2, offsetX: -o.w / 2, offsetY: -o.h / 2, stroke: o.color, strokeWidth: sw, fill });
       break;
     case 'text':
-      n.setAttrs({ text: o.text || '', fontSize: o.fs || 32, fill: o.color, width: o.w || 'auto' });
+      n.setAttrs({ text: o.text || '', fontSize: o.fs || 32 * U(), fill: o.color, width: o.w || 'auto' });
       break;
     case 'sticky': {
       n.findOne('.bg').setAttrs({ width: o.w, height: o.h, fill: o.color });
@@ -242,7 +262,7 @@ function updateNode(n, o) {
       if (n.getAttr('src') !== o.src) {
         n.setAttr('src', o.src);
         const img = new Image();
-        img.onload = () => { if (n.getAttr('src') === o.src) { n.image(img); layer.batchDraw(); } };
+        img.onload = () => { if (n.getAttr('src') === o.src) { n.image(img); layer.batchDraw(); markPage(o.page); } };
         img.src = o.src;
       }
       break;
@@ -462,7 +482,7 @@ function deleteSelection() {
   pushHistory(entries);
 }
 
-function duplicate(objs = selectedObjs(), offset = 24) {
+function duplicate(objs = selectedObjs(), offset = 24 * U()) {
   if (!objs.length) return;
   const now = Date.now();
   const ids = objs.map((o, i) => {
@@ -571,13 +591,14 @@ function editText(id, isNew = false) {
     let dy = 0;
     if (sticky) {
       ta.style.fontSize = tnode.fontSize() + 'px';
+      ta.style.padding = `0 ${stickyPad(cur.w)}px`;
       ta.style.width = cur.w + 'px';
       ta.style.height = 'auto';
       const h = Math.min(cur.h, ta.scrollHeight);
       ta.style.height = h + 'px';
       dy = (cur.h - h) / 2;
     } else {
-      const fs = cur.fs || 32;
+      const fs = cur.fs || 32 * U();
       tnode.text(ta.value || ' ');
       ta.style.fontSize = fs + 'px';
       ta.style.color = cur.color;
@@ -633,7 +654,7 @@ function editText(id, isNew = false) {
 
 function createSticky(wp) {
   const id = rid();
-  const size = 200;
+  const size = round(200 * U());
   const x = clamp(wp.x - size / 2, 0, PAGE_W - size), y = clamp(wp.y - size / 2, 0, PAGE_H - size);
   putObject(id, newObj('sticky', { x: round(x), y: round(y), w: size, h: size, color: prefs.stickyColor, text: '' }));
   setTool('select');
@@ -642,7 +663,7 @@ function createSticky(wp) {
 
 function createText(wp, text = '') {
   const id = rid();
-  const fs = prefs.text.size;
+  const fs = round(prefs.text.size * U());
   putObject(id, newObj('text', { x: round(wp.x), y: round(wp.y - fs * 0.6), text, color: prefs.text.color, fs }));
   setTool('select');
   if (text) {
@@ -767,7 +788,7 @@ function startStroke(e, wp) {
   const st = hl ? prefs.hl : prefs.pen;
   const id = rid();
   const x = round(wp.x), y = round(wp.y);
-  putObject(id, newObj('stroke', { points: [x, y, x, y], color: st.color, width: st.width, ...(hl ? { hl: 1 } : {}) }));
+  putObject(id, newObj('stroke', { points: [x, y, x, y], color: st.color, width: round(st.width * U(), 2), ...(hl ? { hl: 1 } : {}) }));
   S.busy.add(id);
   gesture = { kind: 'draw', id, pts: [x, y], node: S.nodes.get(id) };
   capture(e);
@@ -830,7 +851,7 @@ const sendShape = throttle((id, p) => { if (S.objects.has(id)) S.sync.updateObje
 function startShape(e, wp) {
   const id = rid();
   const k = prefs.shape.kind;
-  const base = { x: round(wp.x), y: round(wp.y), color: prefs.shape.color, sw: 4 };
+  const base = { x: round(wp.x), y: round(wp.y), color: prefs.shape.color, sw: round(4 * U(), 2) };
   putObject(id, newObj(k, k === 'line' || k === 'arrow' ? { ...base, points: [0, 0, 0, 0] } : { ...base, w: 1, h: 1 }));
   S.busy.add(id);
   gesture = { kind: 'shape', id, k, x0: wp.x, y0: wp.y, p: null };
@@ -867,9 +888,10 @@ function endShape(g) {
   let p = g.p;
   const tiny = !p || (p.points ? Math.hypot(p.points[2], p.points[3]) * s < 8 : p.w * s < 8 && p.h * s < 8);
   if (tiny) {
+    const u = U();
     p = g.k === 'line' || g.k === 'arrow'
-      ? { points: [0, 0, 160, 0] }
-      : { x: round(g.x0 - 80), y: round(g.y0 - 55), w: 160, h: 110 };
+      ? { points: [0, 0, round(160 * u), 0] }
+      : { x: round(g.x0 - 80 * u), y: round(g.y0 - 55 * u), w: round(160 * u), h: round(110 * u) };
   }
   S.busy.delete(g.id);
   patch(g.id, p);
@@ -940,24 +962,31 @@ const readFile = (file) => new Promise((res, rej) => { const r = new FileReader(
 const loadImg = (src) => new Promise((res, rej) => { const i = new Image(); i.onload = () => res(i); i.onerror = rej; i.src = src; });
 
 // Reduz imagens grandes para não pesar na sincronização.
+// Prints e desenhos (PNG) ficam em PNG para o texto não borrar; fotos viram JPEG.
+// Só volta para JPEG se o PNG ficar pesado demais para sincronizar.
+function encodeCanvas(c, preferPng, maxPng = 4_000_000) {
+  if (preferPng) {
+    const png = c.toDataURL('image/png');
+    if (png.length < maxPng) return png;
+  }
+  return c.toDataURL('image/jpeg', 0.92);
+}
+
+// Reduz só imagens muito grandes (acima de 2560 px) para não pesar na sincronização.
 async function compressImage(file) {
   const url = await readFile(file);
-  if (file.size < 300_000) return url;
   const img = await loadImg(url);
-  const sc = Math.min(1, 1600 / Math.max(img.width, img.height));
+  const sc = Math.min(1, 2560 / Math.max(img.width, img.height));
+  if (sc === 1 && file.size < 2_000_000) return url;
   const c = document.createElement('canvas');
   c.width = Math.round(img.width * sc);
   c.height = Math.round(img.height * sc);
   const ctx = c.getContext('2d');
-  if (file.type === 'image/png') {
-    ctx.drawImage(img, 0, 0, c.width, c.height);
-    const png = c.toDataURL('image/png');
-    if (png.length < 1_500_000) return png;
-  }
-  ctx.fillStyle = '#fff';
-  ctx.fillRect(0, 0, c.width, c.height);
+  const png = file.type === 'image/png';
+  if (!png) { ctx.fillStyle = '#fff'; ctx.fillRect(0, 0, c.width, c.height); }
+  ctx.imageSmoothingQuality = 'high';
   ctx.drawImage(img, 0, 0, c.width, c.height);
-  return c.toDataURL('image/jpeg', 0.85);
+  return encodeCanvas(c, png);
 }
 
 async function addImageFile(file, at) {
@@ -986,37 +1015,133 @@ const pageBackgrounds = (pid = S.page) =>
 
 // Ajusta a imagem ao slide: se já for quase 16:9, preenche (corta um pouco);
 // senão mostra inteira, centralizada sobre branco.
-async function makeBackground(file) {
-  const img = await loadImg(await readFile(file));
-  const W = PAGE_W, H = PAGE_H;
+function fitToSlide(w, h, W, H) {
+  const cover = Math.abs(w / h / (W / H) - 1) < 0.15;
+  const sc = cover ? Math.max(W / w, H / h) : Math.min(W / w, H / h);
+  return { sc, x: (W - w * sc) / 2, y: (H - h * sc) / 2, cover };
+}
+
+function slideCanvas(W) {
   const c = document.createElement('canvas');
   c.width = W;
-  c.height = H;
+  c.height = Math.round(W * PAGE_H / PAGE_W);
   const ctx = c.getContext('2d');
   ctx.fillStyle = '#fff';
-  ctx.fillRect(0, 0, W, H);
-  const cover = Math.abs(img.width / img.height / (W / H) - 1) < 0.15;
-  const sc = cover ? Math.max(W / img.width, H / img.height) : Math.min(W / img.width, H / img.height);
-  const w = img.width * sc, h = img.height * sc;
+  ctx.fillRect(0, 0, c.width, c.height);
+  return [c, ctx];
+}
+
+// SVG (vetorial) é desenhado em 3840 px de largura, nítido até em telas Retina.
+// Imagens comuns mantêm a própria resolução (sem ampliar à toa), até 3840 px.
+async function makeBackground(file) {
+  const img = await loadImg(await readFile(file));
+  const ratio = PAGE_W / PAGE_H;
+  const vector = file.type === 'image/svg+xml';
+  const { cover } = fitToSlide(img.width, img.height, ratio, 1);
+  const fit = cover ? Math.min(img.width, img.height * ratio) : Math.max(img.width, img.height * ratio);
+  const [c, ctx] = slideCanvas(vector ? 3840 : Math.round(clamp(fit, PAGE_W, 3840)));
+  const f = fitToSlide(img.width, img.height, c.width, c.height);
   ctx.imageSmoothingQuality = 'high';
-  ctx.drawImage(img, (W - w) / 2, (H - h) / 2, w, h);
-  return c.toDataURL('image/jpeg', 0.85);
+  ctx.drawImage(img, f.x, f.y, img.width * f.sc, img.height * f.sc);
+  return encodeCanvas(c, vector || file.type === 'image/png');
+}
+
+/* ---------- PDF como fundo ---------- */
+
+const PDFJS = 'https://cdn.jsdelivr.net/npm/pdfjs-dist@4.4.168/build/';
+let pdfjs = null;
+function loadPdfjs() {
+  pdfjs ||= import(PDFJS + 'pdf.min.mjs').then((m) => {
+    m.GlobalWorkerOptions.workerSrc = PDFJS + 'pdf.worker.min.mjs';
+    return m;
+  });
+  pdfjs.catch(() => { pdfjs = null; });
+  return pdfjs;
+}
+
+const isPdf = (file) => file?.type === 'application/pdf' || /\.pdf$/i.test(file?.name || '');
+
+// Uma página do PDF desenhada direto em 2560 px de largura (o PDF é vetorial, então fica nítido).
+async function pdfPageBackground(doc, n) {
+  const page = await doc.getPage(n);
+  const vp = page.getViewport({ scale: 1 });
+  const [c, ctx] = slideCanvas(2560);
+  const f = fitToSlide(vp.width, vp.height, c.width, c.height);
+  const pv = page.getViewport({ scale: f.sc });
+  const pc = document.createElement('canvas');
+  pc.width = Math.ceil(pv.width);
+  pc.height = Math.ceil(pv.height);
+  await page.render({ canvasContext: pc.getContext('2d'), viewport: pv, background: '#fff' }).promise;
+  ctx.drawImage(pc, Math.round(f.x), Math.round(f.y));
+  page.cleanup();
+  return encodeCanvas(c, true, 1_500_000);
+}
+
+// Novo quadro logo depois de `pid`.
+function insertPageAfter(pid) {
+  const list = pageList();
+  const pages = S.meta.pages;
+  const next = list[list.indexOf(pid) + 1];
+  const ord = (id) => pages[id]?.order || 0;
+  const order = next ? (ord(pid) + ord(next)) / 2 : ord(pid) + 1;
+  const np = rid();
+  S.sync.setMeta({ ['pages/' + np]: { order } });
+  return np;
+}
+
+// Troca o fundo de um quadro; devolve as entradas para o histórico.
+function putBackground(src, pid = S.page) {
+  const entries = pageBackgrounds(pid).map((id) => ({ id, before: clone(S.objects.get(id)), after: null }));
+  entries.forEach((e) => deleteObject(e.id));
+  const id = 'bg' + rid();
+  putObject(id, newObj('background', { page: pid, x: 0, y: 0, w: PAGE_W, h: PAGE_H, src, z: -1e13 }));
+  entries.push({ id, before: null, after: clone(S.objects.get(id)) });
+  return entries;
+}
+
+const MAX_PDF_PAGES = 60;
+
+async function setPdfBackground(file) {
+  toast('Abrindo o PDF…', 20000);
+  const lib = await loadPdfjs();
+  const doc = await lib.getDocument({ data: await file.arrayBuffer() }).promise;
+  try {
+    const total = Math.min(doc.numPages, MAX_PDF_PAGES);
+    const all = total > 1 && confirm(
+      `Este PDF tem ${doc.numPages} páginas.\n\n` +
+      `OK: criar um quadro para cada página (a 1ª fica neste quadro).\n` +
+      `Cancelar: usar só a 1ª página como fundo deste quadro.` +
+      (doc.numPages > MAX_PDF_PAGES ? `\n\n(Serão importadas só as ${MAX_PDF_PAGES} primeiras.)` : ''));
+    const count = all ? total : 1;
+    const start = S.page;
+    const entries = [];
+    let pid = start;
+    for (let i = 1; i <= count; i++) {
+      if (count > 1) toast(`Importando página ${i} de ${count}…`, 20000);
+      const src = await pdfPageBackground(doc, i);
+      if (!S.sync) return; // saiu do mural no meio
+      if (i > 1) pid = insertPageAfter(pid);
+      entries.push(...putBackground(src, pid));
+    }
+    pushHistory(entries);
+    renderPagesUI();
+    if (count > 1) { toggleFrames(true); toast(`${count} páginas importadas, uma em cada quadro.`); }
+    else toast('Fundo do quadro atualizado.');
+  } finally {
+    doc.destroy();
+  }
 }
 
 async function setBackground(file) {
-  if (!file?.type.startsWith('image/') || !S.sync || !S.page) return;
+  if (!file || !S.sync || !S.page) return;
   try {
-    const src = await makeBackground(file);
-    const entries = pageBackgrounds().map((id) => ({ id, before: clone(S.objects.get(id)), after: null }));
-    entries.forEach((e) => deleteObject(e.id));
-    const id = 'bg' + rid();
-    putObject(id, newObj('background', { x: 0, y: 0, w: PAGE_W, h: PAGE_H, src, z: -1e13 }));
-    entries.push({ id, before: null, after: clone(S.objects.get(id)) });
-    pushHistory(entries);
+    if (isPdf(file)) return await setPdfBackground(file);
+    if (!file.type.startsWith('image/')) return toast('Escolha uma imagem ou um PDF.');
+    pushHistory(putBackground(await makeBackground(file)));
     renderPagesUI();
   } catch (err) {
     console.error(err);
-    toast('Não foi possível usar essa imagem como fundo.');
+    toast(isPdf(file) ? 'Não foi possível ler esse PDF.' : 'Não foi possível usar essa imagem como fundo.', 4000);
   }
 }
 
@@ -1232,12 +1357,7 @@ function deletePage(pid = S.page) {
 
 // Cópia do quadro logo depois dele, com todos os objetos.
 function duplicatePage(pid) {
-  const list = pageList();
-  const pages = S.meta.pages;
-  const next = list[list.indexOf(pid) + 1];
-  const order = next ? ((pages[pid].order || 0) + (pages[next].order || 0)) / 2 : (pages[pid].order || 0) + 1;
-  const np = rid();
-  S.sync.setMeta({ ['pages/' + np]: { order } });
+  const np = insertPageAfter(pid);
   for (const o of [...S.objects.values()].filter((o) => o.page === pid)) putObject(rid(), { ...clone(o), page: np });
   goPage(np);
 }
@@ -1348,6 +1468,7 @@ $('#page-add').addEventListener('click', addPage);
 function applyMeta(m) {
   S.meta = m || {};
   S.meta.pages ||= {};
+  setPageSize(S.meta.size);
   const title = $('#title');
   if (document.activeElement !== title) title.value = S.meta.title || '';
   document.title = (S.meta.title || 'Mural sem título') + ' — Jambra';
@@ -1491,7 +1612,7 @@ async function openBoard(roomId, opts = {}) {
   await Promise.race([sync.ready, wait(8000)]);
   if (S.token !== token) return;
   if (opts.snapshot && (await sync.isEmpty())) await sync.load(opts.snapshot);
-  if (opts.isNew) sync.setMeta({ title: 'Mural sem título', created: Date.now() });
+  if (opts.isNew) sync.setMeta({ title: 'Mural sem título', created: Date.now(), size: SLIDE_SIZE });
   if (!pageList().length) sync.setMeta({ ['pages/' + rid()]: { order: 0 } });
   goPage(pageList()[0]);
   renderPeople();
@@ -1603,7 +1724,7 @@ function renderPageImage(maxPx, scale) {
 }
 
 function exportPNG() {
-  const url = renderPageImage(3200, 2);
+  const url = renderPageImage(Math.max(1920, PAGE_W * 2), Math.max(2, 1920 / PAGE_W));
   const n = pageList().indexOf(S.page) + 1;
   download(url, `${fileName()} - quadro ${n}.png`);
 }
