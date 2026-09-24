@@ -190,6 +190,17 @@ function fitView() {
 function updateBg() {
   const s = stage.scaleX();
   Object.assign(paperEl.style, { left: stage.x() + 'px', top: stage.y() + 'px', width: PAGE_W * s + 'px', height: PAGE_H * s + 'px' });
+  placeSlideNav();
+}
+
+// Celular: botões de anterior/próximo na área livre logo abaixo do slide
+// (escondidos quando não há espaço, p.ex. com o celular deitado).
+function placeSlideNav() {
+  const nav = $('#slide-nav');
+  const top = Math.max(stage.y() + PAGE_H * stage.scaleX(), 0) + 20;
+  const limit = stage.height() - 76 - 48 - 12; // acima da barra de ferramentas
+  nav.hidden = top > limit;
+  nav.style.top = top + 'px';
 }
 
 /* ================= objetos ================= */
@@ -1325,8 +1336,9 @@ function renderPagesUI() {
   const list = pageList();
   const i = list.indexOf(S.page);
   $('#page-num').textContent = `${i + 1} / ${list.length}`;
-  $('#page-prev').disabled = i <= 0;
-  $('#page-next').disabled = i >= list.length - 1;
+  $('#page-prev').disabled = $('#nav-prev').disabled = i <= 0;
+  $('#page-next').disabled = $('#nav-next').disabled = i >= list.length - 1;
+  $('#nav-num').textContent = `${i + 1} / ${list.length}`;
 }
 
 function stepPage(d) {
@@ -1464,6 +1476,8 @@ $('#frames').addEventListener('dragend', () => {
 });
 
 $('#page-prev').addEventListener('click', () => stepPage(-1));
+$('#nav-prev').addEventListener('click', () => stepPage(-1));
+$('#nav-next').addEventListener('click', () => stepPage(1));
 $('#page-next').addEventListener('click', () => stepPage(1));
 $('#page-add').addEventListener('click', addPage);
 
