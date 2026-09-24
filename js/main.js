@@ -172,7 +172,8 @@ const selectableNodes = () => visibleNodes().filter((n) => n.getAttr('otype') !=
 // Área livre para o slide (descontando a barra de ferramentas e o zoom).
 function area() {
   const W = stage.width(), H = stage.height();
-  const m = W < 760 ? { l: 12, r: 12, t: 12, b: 76 } : { l: 80, r: 24, t: 24, b: 64 };
+  // no computador sobra espaço dos lados para os botões ‹ › de navegação
+  const m = W < 760 ? { l: 12, r: 12, t: 12, b: 76 } : { l: 136, r: 76, t: 24, b: 64 };
   return { l: m.l, t: m.t, w: Math.max(100, W - m.l - m.r), h: Math.max(100, H - m.t - m.b) };
 }
 const minScale = () => { const a = area(); return Math.min(a.w / PAGE_W, a.h / PAGE_H); };
@@ -220,6 +221,13 @@ function updateBg() {
 // Celular: botões de anterior/próximo na área livre logo abaixo do slide
 // (escondidos quando não há espaço, p.ex. com o celular deitado).
 function placeSlideNav() {
+  // computador: ‹ e › dos lados do slide, na altura do meio (sem sair da área visível)
+  const s = stage.scaleX(), W = stage.width(), H = stage.height();
+  const left = stage.x(), right = stage.x() + PAGE_W * s;
+  const midY = clamp(stage.y() + (PAGE_H * s) / 2, 60, H - 60) - 22;
+  const prev = $('#side-prev'), next = $('#side-next');
+  prev.style.transform = `translate(${Math.max(left - 58, 78)}px, ${midY}px)`;
+  next.style.transform = `translate(${Math.min(right + 14, W - 58)}px, ${midY}px)`;
   const nav = $('#slide-nav');
   const top = Math.max(stage.y() + PAGE_H * stage.scaleX(), 0) + 20;
   const limit = stage.height() - 76 - 48 - 12; // acima da barra de ferramentas
@@ -1444,8 +1452,8 @@ function renderPagesUI() {
   const list = pageList();
   const i = list.indexOf(S.page);
   $('#page-num').textContent = `${i + 1} / ${list.length}`;
-  $('#page-prev').disabled = $('#nav-prev').disabled = i <= 0;
-  $('#page-next').disabled = $('#nav-next').disabled = i >= list.length - 1;
+  $('#page-prev').disabled = $('#nav-prev').disabled = $('#side-prev').disabled = i <= 0;
+  $('#page-next').disabled = $('#nav-next').disabled = $('#side-next').disabled = i >= list.length - 1;
   $('#nav-num').textContent = `${i + 1} / ${list.length}`;
 }
 
@@ -1585,6 +1593,8 @@ $('#frames').addEventListener('dragend', () => {
 
 $('#page-prev').addEventListener('click', () => stepPage(-1));
 $('#nav-prev').addEventListener('click', () => stepPage(-1));
+$('#side-prev').addEventListener('click', () => stepPage(-1));
+$('#side-next').addEventListener('click', () => stepPage(1));
 $('#nav-next').addEventListener('click', () => stepPage(1));
 $('#page-next').addEventListener('click', () => stepPage(1));
 $('#page-add').addEventListener('click', addPage);
